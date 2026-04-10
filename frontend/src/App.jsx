@@ -1,7 +1,6 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { SocketProvider } from './contexts/SocketContext';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import PatientDashboard from './pages/PatientDashboard';
@@ -73,9 +72,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <SocketProvider>
-          <AppRoutes />
-        </SocketProvider>
+        <AppRoutes />
       </AuthProvider>
     </BrowserRouter>
   );

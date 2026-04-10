@@ -1,9 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const { PrismaClient } = require('@prisma/client');
 const { authenticate, requireRole } = require('../middleware/auth');
-
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // GET /api/doctors — list all online doctors (for patients to nudge)
 router.get('/', authenticate, async (req, res) => {

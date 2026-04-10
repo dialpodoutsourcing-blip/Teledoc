@@ -757,6 +757,8 @@ tbody tr:hover { background: rgba(255,255,255,0.02); }
 .profile-field { margin-bottom: 10px; }
 .profile-field-label { font-size: 11px; color: var(--text-muted); margin-bottom: 2px; }
 .profile-field-value { font-size: 13.5px; color: var(--text-primary); font-weight: 500; }
+.consultation-room-id { word-break: break-word; }
+.consultation-copy-btn { margin-top: 10px; }
 
 .history-item {
   background: var(--bg-card);
@@ -948,6 +950,47 @@ tbody tr:hover { background: rgba(255,255,255,0.02); }
   animation: slideInRight 0.3s ease;
 }
 
+.realtime-notice {
+  margin-bottom: 20px;
+  padding: 16px 18px;
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.14), rgba(17, 24, 39, 0.94));
+}
+
+.realtime-notice-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #fbbf24;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.realtime-notice-body {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.video-demo-launcher {
+  padding: 22px;
+}
+
+.video-demo-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.video-demo-join {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 280px;
+}
+
 @keyframes slideInRight {
   from { transform: translateX(100%); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
@@ -1067,6 +1110,35 @@ tbody tr:hover { background: rgba(255,255,255,0.02); }
 }
 
 @media (max-width: 640px) {
+  .consultation-layout {
+    grid-template-columns: 1fr;
+    height: auto;
+    min-height: 100vh;
+  }
+
+  .consultation-sidebar {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .video-local {
+    width: 120px;
+    height: 84px;
+    bottom: 12px;
+    right: 12px;
+  }
+
+  .call-controls {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .video-demo-actions,
+  .video-demo-join {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
   .auth-page {
     padding: 20px;
   }

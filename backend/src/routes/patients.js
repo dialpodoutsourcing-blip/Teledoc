@@ -1,9 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const { PrismaClient } = require('@prisma/client');
 const { authenticate, requireRole } = require('../middleware/auth');
-
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // GET /api/patients/profile  — get own profile
 router.get('/profile', authenticate, requireRole('PATIENT'), async (req, res) => {

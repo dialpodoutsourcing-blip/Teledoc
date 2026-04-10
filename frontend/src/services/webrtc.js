@@ -1,37 +1,45 @@
-/** WebRTC peer connection manager */
-
 const ICE_SERVERS = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-  ],
+  iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
 };
 
-let peerConnection = null;
-let localStream = null;
-
-export function getLocalStream() {
-  return localStream;
+export async function getUserMediaStream() {
+  return navigator.mediaDevices.getUserMedia({
+    video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+    audio: true,
+  });
 }
 
-export async function initLocalStream(videoEl) {
-  try {
-    localStream = await navigator.mediaDevices.getUserMedia({
-      video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
-      audio: true,
-    });
-    if (videoEl) {
-      videoEl.srcObject = localStream;
-    }
-    return localStream;
-  } catch (err) {
-    console.error('[WebRTC] Failed to get media:', err);
-    throw err;
+export function stopMediaStream(stream) {
+  if (!stream) {
+    return;
   }
+
+  stream.getTracks().forEach((track) => track.stop());
 }
 
-export function createPeerConnection(onIceCandidate, onRemoteStream, onConnectionStateChange) {
-  peerConnection = new RTCPeerConnection(ICE_SERVERS);
+export function setAudioEnabled(stream, enabled) {
+  if (!stream) {
+    return;
+  }
+
+  stream.getAudioTracks().forEach((track) => {
+    track.enabled = enabled;
+  });
+}
+
+export function setVideoEnabled(stream, enabled) {
+  if (!stream) {
+    return;
+  }
+
+  stream.getVideoTracks().forEach((track) => {
+    track.enabled = enabled;
+  });
+}
+
+export function createWebRTCPeer({ localStream, onIceCandidate, onRemoteStream, onConnectionStateChange }) {
+  const peerConnection = new RTCPeerConnection(ICE_SERVERS);
+  const queuedCandidates = [];
 
   if (localStream) {
     localStream.getTracks().forEach((track) => {
@@ -57,59 +65,60 @@ export function createPeerConnection(onIceCandidate, onRemoteStream, onConnectio
     }
   };
 
-  return peerConnection;
-}
+  const flushQueuedCandidates = async () => {
+    if (!peerConnection.remoteDescription) {
+      return;
+    }
 
-export async function createOffer() {
-  if (!peerConnection) return null;
-  const offer = await peerConnection.createOffer();
-  await peerConnection.setLocalDescription(offer);
-  return offer;
-}
+    while (queuedCandidates.length > 0) {
+      const candidate = queuedCandidates.shift();
+      try {
+        await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (error) {
+        console.error('[WebRTC] Failed to flush queued ICE candidate', error);
+      }
+    }
+  };
 
-export async function handleOffer(offer) {
-  if (!peerConnection) return null;
-  await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-  const answer = await peerConnection.createAnswer();
-  await peerConnection.setLocalDescription(answer);
-  return answer;
-}
+  return {
+    peerConnection,
+    async createOffer() {
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+      return offer;
+    },
+    async setRemoteOffer(offer) {
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+      await flushQueuedCandidates();
+    },
+    async createAnswer() {
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
+      return answer;
+    },
+    async setRemoteAnswer(answer) {
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+      await flushQueuedCandidates();
+    },
+    async addIceCandidate(candidate) {
+      if (!candidate) {
+        return;
+      }
 
-export async function handleAnswer(answer) {
-  if (!peerConnection) return;
-  await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-}
+      if (!peerConnection.remoteDescription) {
+        queuedCandidates.push(candidate);
+        return;
+      }
 
-export async function addIceCandidate(candidate) {
-  if (!peerConnection) return;
-  try {
-    await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-  } catch (err) {
-    console.error('[WebRTC] ICE candidate error:', err);
-  }
-}
-
-export function toggleAudio(enabled) {
-  if (!localStream) return;
-  localStream.getAudioTracks().forEach((track) => {
-    track.enabled = enabled;
-  });
-}
-
-export function toggleVideo(enabled) {
-  if (!localStream) return;
-  localStream.getVideoTracks().forEach((track) => {
-    track.enabled = enabled;
-  });
-}
-
-export function closeConnection() {
-  if (localStream) {
-    localStream.getTracks().forEach((t) => t.stop());
-    localStream = null;
-  }
-  if (peerConnection) {
-    peerConnection.close();
-    peerConnection = null;
-  }
+      await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    },
+    close() {
+      peerConnection.onicecandidate = null;
+      peerConnection.ontrack = null;
+      peerConnection.onconnectionstatechange = null;
+      if (peerConnection.signalingState !== 'closed') {
+        peerConnection.close();
+      }
+    },
+  };
 }

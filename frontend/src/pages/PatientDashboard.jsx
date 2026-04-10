@@ -1,150 +1,150 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { useSocket } from '../contexts/SocketContext';
-import {
-  getPatientProfile, updatePatientProfile, getDoctors,
-  bookAppointment, getAppointments, getPatientHistory
-} from '../services/api';
 import AppointmentModal from '../components/AppointmentModal';
+import VideoDemoLauncher from '../components/VideoDemoLauncher';
+import {
+  bookAppointment,
+  getAppointments,
+  getDoctors,
+  getPatientHistory,
+  getPatientProfile,
+  updatePatientProfile,
+} from '../services/api';
+
+function getStatusBadgeClass(status) {
+  if (status === 'ACCEPTED') return 'badge-success';
+  if (status === 'REJECTED' || status === 'CANCELLED') return 'badge-danger';
+  if (status === 'COMPLETED') return 'badge-muted';
+  return 'badge-warning';
+}
+
+function formatDisplayDate(value, options) {
+  if (!value) return '-';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '-';
+  }
+
+  return date.toLocaleString(undefined, options);
+}
+
+function toDateInputValue(value) {
+  if (!value) return '';
+  return String(value).slice(0, 10);
+}
 
 export default function PatientDashboard() {
-  const { user, logout } = useAuth();
-  const { socket, onlineDoctors } = useSocket();
-  const navigate = useNavigate();
+  const { logout } = useAuth();
 
   const [activeTab, setActiveTab] = useState('overview');
   const [profile, setProfile] = useState(null);
+  const [profileForm, setProfileForm] = useState({});
   const [doctors, setDoctors] = useState([]);
   const [appointments, setAppointments] = useState([]);
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [nudging, setNudging] = useState(null);
-  const [nudgeStatus, setNudgeStatus] = useState('');
-  const [showApptModal, setShowApptModal] = useState(false);
-  const [selectedDoctor, setSelectedDoctor] = useState(null);
   const [profileEdit, setProfileEdit] = useState(false);
-  const [profileForm, setProfileForm] = useState({});
+  const [selectedDoctor, setSelectedDoctor] = useState(null);
+  const [showAppointmentModal, setShowAppointmentModal] = useState(false);
   const [toast, setToast] = useState(null);
+  const toastTimerRef = useRef(null);
 
-  const showToast = (msg, type = 'info') => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 3500);
+  const showToast = (message, type = 'info') => {
+    setToast({ message, type });
+    window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 3200);
+  };
+
+  const loadDashboard = async () => {
+    const [profileResponse, doctorsResponse, appointmentsResponse, historyResponse] = await Promise.all([
+      getPatientProfile(),
+      getDoctors(),
+      getAppointments(),
+      getPatientHistory(),
+    ]);
+
+    setProfile(profileResponse.data);
+    setProfileForm(profileResponse.data);
+    setDoctors(doctorsResponse.data);
+    setAppointments(appointmentsResponse.data);
+    setHistory(historyResponse.data);
   };
 
   useEffect(() => {
-    Promise.all([getPatientProfile(), getDoctors(), getAppointments(), getPatientHistory()])
-      .then(([p, d, a, h]) => {
-        setProfile(p.data);
-        setProfileForm(p.data);
-        setDoctors(d.data);
-        setAppointments(a.data);
-        setHistory(h.data);
+    let cancelled = false;
+
+    loadDashboard()
+      .catch((error) => {
+        console.error(error);
+        if (!cancelled) {
+          showToast('Failed to load patient dashboard', 'error');
+        }
       })
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, []);
-
-  // Socket listeners
-  useEffect(() => {
-    if (!socket) return;
-
-    socket.on('nudge_accepted', ({ roomId, consultationId }) => {
-      setNudging(null);
-      setNudgeStatus('');
-      showToast('Doctor accepted! Joining call...', 'success');
-      setTimeout(() => navigate(`/consultation/${roomId}`), 1000);
-    });
-
-    socket.on('nudge_rejected', () => {
-      setNudging(null);
-      setNudgeStatus('');
-      showToast('Doctor is unavailable right now.', 'error');
-    });
-
-    socket.on('nudge_failed', ({ message }) => {
-      setNudging(null);
-      setNudgeStatus('');
-      showToast(message, 'error');
-    });
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
 
     return () => {
-      socket.off('nudge_accepted');
-      socket.off('nudge_rejected');
-      socket.off('nudge_failed');
+      cancelled = true;
+      window.clearTimeout(toastTimerRef.current);
     };
-  }, [socket, navigate]);
+  }, []);
 
-  const handleNudge = async (doctor) => {
-    if (!socket) return;
-    setNudging(doctor);
-    setNudgeStatus('Sending request...');
-
-    // create a nudge appointment first
-    try {
-      const apptRes = await bookAppointment({
-        doctorId: doctor.id,
-        scheduledAt: new Date().toISOString(),
-        reason: 'Instant consultation request',
-        type: 'NUDGE',
-      });
-
-      socket.emit('nudge_doctor', {
-        doctorProfileId: doctor.id,
-        patientProfileId: profile.id,
-        patientName: `${profile.firstName} ${profile.lastName}`,
-        appointmentId: apptRes.data.id,
-        reason: 'Instant consultation',
-      });
-      setNudgeStatus('Waiting for doctor to accept...');
-    } catch (err) {
-      setNudging(null);
-      showToast('Failed to send request', 'error');
-    }
-  };
+  const upcomingAppointments = useMemo(
+    () => appointments.filter((appointment) => appointment.status === 'ACCEPTED'),
+    [appointments]
+  );
 
   const handleBookAppointment = async (data) => {
+    if (!selectedDoctor) {
+      return;
+    }
+
     try {
-      await bookAppointment({ ...data, doctorId: selectedDoctor.id, type: 'SCHEDULED' });
-      const res = await getAppointments();
-      setAppointments(res.data);
-      setShowApptModal(false);
-      showToast('Appointment booked!', 'success');
-    } catch (err) {
+      await bookAppointment({
+        ...data,
+        doctorId: selectedDoctor.id,
+        type: 'SCHEDULED',
+      });
+
+      const appointmentsResponse = await getAppointments();
+      setAppointments(appointmentsResponse.data);
+      setShowAppointmentModal(false);
+      setSelectedDoctor(null);
+      showToast('Appointment booked', 'success');
+    } catch (error) {
+      console.error(error);
       showToast('Failed to book appointment', 'error');
     }
   };
 
   const handleProfileSave = async () => {
     try {
-      const res = await updatePatientProfile(profileForm);
-      setProfile(res.data);
+      const response = await updatePatientProfile(profileForm);
+      setProfile(response.data);
+      setProfileForm(response.data);
       setProfileEdit(false);
-      showToast('Profile updated!', 'success');
-    } catch {
+      showToast('Profile updated', 'success');
+    } catch (error) {
+      console.error(error);
       showToast('Failed to update profile', 'error');
     }
   };
 
-  const isOnline = (doctorId) => onlineDoctors.includes(doctorId);
-
-  const apptStatusClass = (s) => {
-    if (s === 'ACCEPTED') return 'badge-success';
-    if (s === 'REJECTED' || s === 'CANCELLED') return 'badge-danger';
-    if (s === 'COMPLETED') return 'badge-muted';
-    return 'badge-warning';
-  };
-
-  if (loading) return (
-    <div className="loading-page">
-      <div className="spinner" style={{ width: 36, height: 36 }} />
-      <span>Loading your dashboard...</span>
-    </div>
-  );
+  if (loading) {
+    return (
+      <div className="loading-page">
+        <div className="spinner" style={{ width: 36, height: 36 }} />
+        <span>Loading your dashboard...</span>
+      </div>
+    );
+  }
 
   return (
     <div className="app-layout">
-      {/* Sidebar */}
       <aside className="sidebar">
         <div className="sidebar-logo">
           <div className="logo-mark">
@@ -152,189 +152,203 @@ export default function PatientDashboard() {
             <span className="logo-text">MediConnect</span>
           </div>
         </div>
+
         <nav className="sidebar-nav">
           <div className="nav-section-label">Patient Portal</div>
           {[
-            { id: 'overview', icon: '🏠', label: 'Overview' },
-            { id: 'doctors', icon: '👨‍⚕️', label: 'Find Doctors' },
-            { id: 'appointments', icon: '📅', label: 'Appointments' },
-            { id: 'history', icon: '📋', label: 'Medical History' },
-            { id: 'profile', icon: '👤', label: 'My Profile' },
+            { id: 'overview', icon: 'OV', label: 'Overview' },
+            { id: 'doctors', icon: 'DR', label: 'Find Doctors' },
+            { id: 'appointments', icon: 'AP', label: 'Appointments' },
+            { id: 'history', icon: 'HX', label: 'Medical History' },
+            { id: 'profile', icon: 'PR', label: 'My Profile' },
           ].map((item) => (
-            <button key={item.id} id={`nav-${item.id}`} className={`nav-item ${activeTab === item.id ? 'active' : ''}`} onClick={() => setActiveTab(item.id)}>
+            <button
+              key={item.id}
+              className={`nav-item ${activeTab === item.id ? 'active' : ''}`}
+              onClick={() => setActiveTab(item.id)}
+            >
               <span className="nav-icon">{item.icon}</span>
               {item.label}
             </button>
           ))}
         </nav>
+
         <div className="sidebar-footer">
           <div className="user-pill" onClick={logout} title="Logout">
-            <div className="user-avatar">{profile?.firstName?.[0]}{profile?.lastName?.[0]}</div>
+            <div className="user-avatar">
+              {profile?.firstName?.[0]}
+              {profile?.lastName?.[0]}
+            </div>
             <div className="user-info">
-              <div className="user-name">{profile?.firstName} {profile?.lastName}</div>
-              <div className="user-role">Patient · Logout →</div>
+              <div className="user-name">
+                {profile?.firstName} {profile?.lastName}
+              </div>
+              <div className="user-role">Patient · Logout</div>
             </div>
           </div>
         </div>
       </aside>
 
-      {/* Main area */}
       <main className="main-content">
-        {/* ── Overview ── */}
         {activeTab === 'overview' && (
           <>
             <div className="page-header">
               <div>
-                <div className="page-title">Good day, {profile?.firstName} 👋</div>
-                <div className="page-subtitle">Here's your health overview</div>
+                <div className="page-title">Welcome, {profile?.firstName}</div>
+                <div className="page-subtitle">Schedule care, review appointments, and launch the live video demo.</div>
               </div>
             </div>
 
             <div className="stats-grid">
               <div className="stat-card">
+                <div className="stat-label">Doctors</div>
+                <div className="stat-value">{doctors.length}</div>
+                <div className="stat-desc">Available to book</div>
+              </div>
+              <div className="stat-card">
                 <div className="stat-label">Appointments</div>
                 <div className="stat-value">{appointments.length}</div>
-                <div className="stat-desc">Total booked</div>
+                <div className="stat-desc">Total bookings</div>
               </div>
               <div className="stat-card">
                 <div className="stat-label">Upcoming</div>
-                <div className="stat-value">{appointments.filter(a => a.status === 'ACCEPTED').length}</div>
-                <div className="stat-desc">Confirmed</div>
+                <div className="stat-value">{upcomingAppointments.length}</div>
+                <div className="stat-desc">Accepted consultations</div>
               </div>
               <div className="stat-card">
-                <div className="stat-label">Consultations</div>
+                <div className="stat-label">History</div>
                 <div className="stat-value">{history.length}</div>
-                <div className="stat-desc">Completed</div>
-              </div>
-              <div className="stat-card">
-                <div className="stat-label">Online Doctors</div>
-                <div className="stat-value" style={{ color: 'var(--success)' }}>{onlineDoctors.length}</div>
-                <div className="stat-desc">Available now</div>
+                <div className="stat-desc">Past consultations</div>
               </div>
             </div>
 
             <div className="dashboard-body">
-              {onlineDoctors.length > 0 && (
-                <div style={{ marginBottom: '28px' }}>
-                  <div className="section-header">
-                    <div className="section-title">⚡ Available Now — Instant Consultation</div>
-                  </div>
-                  <div className="doctor-grid">
-                    {doctors.filter(d => isOnline(d.id)).map(doc => (
-                      <div key={doc.id} className="doctor-card online">
-                        <div className="doctor-avatar-lg">{doc.firstName[0]}{doc.lastName[0]}</div>
-                        <div className="doctor-name">Dr. {doc.firstName} {doc.lastName}</div>
-                        <div className="doctor-spec">{doc.specialization || 'General Physician'}</div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
-                          <span className="online-dot" />
-                          <span style={{ fontSize: 12, color: 'var(--success)' }}>Online</span>
-                        </div>
-                        <button id={`nudge-${doc.id}`} className="btn btn-success w-full btn-sm" onClick={() => handleNudge(doc)}>
-                          ⚡ Nudge Doctor
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+              <VideoDemoLauncher />
 
-              <div className="section-header">
-                <div className="section-title">Recent Appointments</div>
-                <button className="btn btn-ghost btn-sm" onClick={() => setActiveTab('appointments')}>View all →</button>
-              </div>
-              {appointments.slice(0, 4).map(appt => (
-                <div key={appt.id} className="appt-item">
-                  <div className="appt-info">
-                    <div className="appt-doctor">Dr. {appt.doctor?.firstName} {appt.doctor?.lastName}</div>
-                    <div className="appt-meta">{appt.doctor?.specialization} · {new Date(appt.scheduledAt).toLocaleString()}</div>
+              <div style={{ marginTop: 28 }}>
+                <div className="section-header">
+                  <div className="section-title">Recent Appointments</div>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setActiveTab('appointments')}>
+                    View All
+                  </button>
+                </div>
+
+                {appointments.length > 0 ? (
+                  appointments.slice(0, 4).map((appointment) => (
+                    <div key={appointment.id} className="appt-item">
+                      <div className="appt-info">
+                        <div className="appt-doctor">
+                          Dr. {appointment.doctor?.firstName} {appointment.doctor?.lastName}
+                        </div>
+                        <div className="appt-meta">
+                          {appointment.doctor?.specialization || 'General Physician'} · {formatDisplayDate(appointment.scheduledAt)}
+                        </div>
+                      </div>
+                      <span className={`badge ${getStatusBadgeClass(appointment.status)}`}>{appointment.status}</span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="empty-state">
+                    <div className="empty-state-icon">AP</div>
+                    <div className="empty-state-title">No appointments yet</div>
+                    <div className="empty-state-desc">Browse doctors and book your first consultation.</div>
                   </div>
-                  <span className={`badge ${apptStatusClass(appt.status)}`}>{appt.status}</span>
-                </div>
-              ))}
-              {appointments.length === 0 && (
-                <div className="empty-state">
-                  <div className="empty-state-icon">📅</div>
-                  <div className="empty-state-title">No appointments yet</div>
-                  <div className="empty-state-desc">Find a doctor and book your first appointment</div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </>
         )}
 
-        {/* ── Find Doctors ── */}
         {activeTab === 'doctors' && (
           <>
             <div className="page-header">
               <div>
                 <div className="page-title">Find a Doctor</div>
-                <div className="page-subtitle">Browse available doctors and request a consultation</div>
+                <div className="page-subtitle">Pick a clinician, then book a scheduled appointment.</div>
               </div>
             </div>
+
             <div className="dashboard-body">
-              <div className="doctor-grid">
-                {doctors.map(doc => {
-                  const online = isOnline(doc.id);
-                  return (
-                    <div key={doc.id} className={`doctor-card ${online ? 'online' : ''}`}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-                        <div className="doctor-avatar-lg">{doc.firstName[0]}{doc.lastName[0]}</div>
-                        {online
-                          ? <span className="badge badge-success"><span className="online-dot" style={{ width: 6, height: 6 }} /> Online</span>
-                          : <span className="badge badge-muted">Offline</span>
-                        }
+              {doctors.length > 0 ? (
+                <div className="doctor-grid">
+                  {doctors.map((doctor) => (
+                    <div key={doctor.id} className="doctor-card">
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+                        <div className="doctor-avatar-lg">
+                          {doctor.firstName?.[0]}
+                          {doctor.lastName?.[0]}
+                        </div>
+                        <span className="badge badge-info">Available to book</span>
                       </div>
-                      <div className="doctor-name">Dr. {doc.firstName} {doc.lastName}</div>
-                      <div className="doctor-spec">{doc.specialization || 'General Physician'}</div>
-                      {doc.bio && <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '8px 0' }}>{doc.bio}</div>}
-                      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                        {online && (
-                          <button id={`nudge-dr-${doc.id}`} className="btn btn-success btn-sm" style={{ flex: 1 }} onClick={() => handleNudge(doc)}>
-                            ⚡ Nudge
-                          </button>
-                        )}
-                        <button id={`book-dr-${doc.id}`} className="btn btn-primary btn-sm" style={{ flex: 1 }} onClick={() => { setSelectedDoctor(doc); setShowApptModal(true); }}>
-                          📅 Schedule
-                        </button>
+
+                      <div className="doctor-name">
+                        Dr. {doctor.firstName} {doctor.lastName}
                       </div>
+                      <div className="doctor-spec">{doctor.specialization || 'General Physician'}</div>
+                      <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', minHeight: 40 }}>
+                        {doctor.bio || 'Open for scheduled consultations and follow-up visits.'}
+                      </div>
+
+                      <button
+                        className="btn btn-primary btn-sm w-full"
+                        style={{ marginTop: 16 }}
+                        onClick={() => {
+                          setSelectedDoctor(doctor);
+                          setShowAppointmentModal(true);
+                        }}
+                      >
+                        Schedule Appointment
+                      </button>
                     </div>
-                  );
-                })}
-              </div>
-              {doctors.length === 0 && (
+                  ))}
+                </div>
+              ) : (
                 <div className="empty-state">
-                  <div className="empty-state-icon">👨‍⚕️</div>
-                  <div className="empty-state-title">No doctors yet</div>
-                  <div className="empty-state-desc">Doctors will appear here once registered</div>
+                  <div className="empty-state-icon">DR</div>
+                  <div className="empty-state-title">No doctors available</div>
+                  <div className="empty-state-desc">Registered doctors will appear here once added.</div>
                 </div>
               )}
             </div>
           </>
         )}
 
-        {/* ── Appointments ── */}
         {activeTab === 'appointments' && (
           <>
             <div className="page-header">
-              <div className="page-title">My Appointments</div>
+              <div>
+                <div className="page-title">My Appointments</div>
+                <div className="page-subtitle">Track upcoming and previous booking requests.</div>
+              </div>
             </div>
+
             <div className="dashboard-body">
               {appointments.length > 0 ? (
                 <div className="table-wrap">
                   <table>
                     <thead>
                       <tr>
-                        <th>Doctor</th><th>Specialization</th><th>Date & Time</th><th>Type</th><th>Status</th>
+                        <th>Doctor</th>
+                        <th>Specialization</th>
+                        <th>Date & Time</th>
+                        <th>Type</th>
+                        <th>Status</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {appointments.map(a => (
-                        <tr key={a.id}>
-                          <td style={{ fontWeight: 600 }}>Dr. {a.doctor?.firstName} {a.doctor?.lastName}</td>
-                          <td style={{ color: 'var(--text-secondary)' }}>{a.doctor?.specialization || '—'}</td>
-                          <td>{new Date(a.scheduledAt).toLocaleString()}</td>
-                          <td><span className="badge badge-info">{a.type}</span></td>
-                          <td><span className={`badge ${apptStatusClass(a.status)}`}>{a.status}</span></td>
+                      {appointments.map((appointment) => (
+                        <tr key={appointment.id}>
+                          <td style={{ fontWeight: 600 }}>
+                            Dr. {appointment.doctor?.firstName} {appointment.doctor?.lastName}
+                          </td>
+                          <td>{appointment.doctor?.specialization || '-'}</td>
+                          <td>{formatDisplayDate(appointment.scheduledAt)}</td>
+                          <td>
+                            <span className="badge badge-info">{appointment.type}</span>
+                          </td>
+                          <td>
+                            <span className={`badge ${getStatusBadgeClass(appointment.status)}`}>{appointment.status}</span>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -342,7 +356,7 @@ export default function PatientDashboard() {
                 </div>
               ) : (
                 <div className="empty-state">
-                  <div className="empty-state-icon">📅</div>
+                  <div className="empty-state-icon">AP</div>
                   <div className="empty-state-title">No appointments</div>
                 </div>
               )}
@@ -350,57 +364,81 @@ export default function PatientDashboard() {
           </>
         )}
 
-        {/* ── History ── */}
         {activeTab === 'history' && (
           <>
             <div className="page-header">
-              <div className="page-title">Medical History</div>
+              <div>
+                <div className="page-title">Medical History</div>
+                <div className="page-subtitle">Review notes from completed consultations.</div>
+              </div>
             </div>
+
             <div className="dashboard-body">
               {history.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                  {history.map(c => (
-                    <div key={c.id} className="card">
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+                  {history.map((consultation) => (
+                    <div key={consultation.id} className="card">
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, marginBottom: 12 }}>
                         <div>
-                          <div style={{ fontWeight: 700, fontSize: 15 }}>{c.medicalRecord?.title || 'Consultation'}</div>
-                          <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
-                            Dr. {c.doctor?.firstName} {c.doctor?.lastName} · {c.doctor?.specialization}
+                          <div style={{ fontWeight: 700, fontSize: 15 }}>
+                            {consultation.medicalRecord?.title || 'Consultation'}
+                          </div>
+                          <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                            Dr. {consultation.doctor?.firstName} {consultation.doctor?.lastName}
+                            {' · '}
+                            {consultation.doctor?.specialization || 'General Physician'}
                           </div>
                         </div>
-                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{new Date(c.startedAt).toLocaleDateString()}</div>
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                          {formatDisplayDate(consultation.startedAt, { dateStyle: 'medium' })}
+                        </div>
                       </div>
+
                       <div className="form-grid">
-                        {c.symptoms && <div><div className="profile-field-label">Symptoms</div><div className="profile-field-value">{c.symptoms}</div></div>}
-                        {c.diagnosis && <div><div className="profile-field-label">Diagnosis</div><div className="profile-field-value" style={{ color: 'var(--accent-bright)' }}>{c.diagnosis}</div></div>}
-                        {c.recommendations && <div><div className="profile-field-label">Recommendations</div><div className="profile-field-value">{c.recommendations}</div></div>}
-                        {c.prescription && <div><div className="profile-field-label">Prescription</div><div className="profile-field-value">{c.prescription}</div></div>}
+                        <div>
+                          <div className="profile-field-label">Symptoms</div>
+                          <div className="profile-field-value">{consultation.symptoms || '-'}</div>
+                        </div>
+                        <div>
+                          <div className="profile-field-label">Diagnosis</div>
+                          <div className="profile-field-value">{consultation.diagnosis || '-'}</div>
+                        </div>
+                        <div>
+                          <div className="profile-field-label">Recommendations</div>
+                          <div className="profile-field-value">{consultation.recommendations || '-'}</div>
+                        </div>
+                        <div>
+                          <div className="profile-field-label">Prescription</div>
+                          <div className="profile-field-value">{consultation.prescription || '-'}</div>
+                        </div>
                       </div>
                     </div>
                   ))}
                 </div>
               ) : (
                 <div className="empty-state">
-                  <div className="empty-state-icon">📋</div>
+                  <div className="empty-state-icon">HX</div>
                   <div className="empty-state-title">No consultation history yet</div>
-                  <div className="empty-state-desc">Completed consultations will appear here</div>
                 </div>
               )}
             </div>
           </>
         )}
 
-        {/* ── Profile ── */}
         {activeTab === 'profile' && (
           <>
             <div className="page-header">
-              <div className="page-title">My Profile</div>
-              <button className="btn btn-primary btn-sm" onClick={() => profileEdit ? handleProfileSave() : setProfileEdit(true)}>
-                {profileEdit ? '💾 Save Changes' : '✏️ Edit Profile'}
+              <div>
+                <div className="page-title">My Profile</div>
+                <div className="page-subtitle">Update your personal and medical details.</div>
+              </div>
+              <button className="btn btn-primary btn-sm" onClick={profileEdit ? handleProfileSave : () => setProfileEdit(true)}>
+                {profileEdit ? 'Save Changes' : 'Edit Profile'}
               </button>
             </div>
+
             <div className="dashboard-body">
-              <div className="card" style={{ maxWidth: 700 }}>
+              <div className="card" style={{ maxWidth: 760 }}>
                 <div className="form-grid" style={{ gap: 20, marginBottom: 20 }}>
                   {[
                     { label: 'First Name', key: 'firstName', type: 'text' },
@@ -409,24 +447,45 @@ export default function PatientDashboard() {
                     { label: 'Blood Type', key: 'bloodType', type: 'text' },
                     { label: 'Gender', key: 'gender', type: 'text' },
                     { label: 'Date of Birth', key: 'dateOfBirth', type: 'date' },
-                  ].map(f => (
-                    <div key={f.key} className="form-group">
-                      <label className="form-label">{f.label}</label>
+                  ].map((field) => (
+                    <div key={field.key} className="form-group">
+                      <label className="form-label">{field.label}</label>
                       {profileEdit ? (
-                        <input className="form-input" type={f.type} value={profileForm[f.key] || ''} onChange={e => setProfileForm(p => ({ ...p, [f.key]: e.target.value }))} />
+                        <input
+                          className="form-input"
+                          type={field.type}
+                          value={field.key === 'dateOfBirth' ? toDateInputValue(profileForm[field.key]) : profileForm[field.key] || ''}
+                          onChange={(event) =>
+                            setProfileForm((current) => ({ ...current, [field.key]: event.target.value }))
+                          }
+                        />
                       ) : (
-                        <div className="profile-field-value">{profile?.[f.key] || <span style={{ color: 'var(--text-muted)' }}>—</span>}</div>
+                        <div className="profile-field-value">
+                          {field.key === 'dateOfBirth'
+                            ? formatDisplayDate(profile?.[field.key], { dateStyle: 'medium' })
+                            : profile?.[field.key] || '-'}
+                        </div>
                       )}
                     </div>
                   ))}
                 </div>
-                {['allergies', 'medications', 'medicalHistory'].map(f => (
-                  <div key={f} className="form-group" style={{ marginBottom: 16 }}>
-                    <label className="form-label" style={{ textTransform: 'capitalize' }}>{f.replace(/([A-Z])/g, ' $1')}</label>
+
+                {['allergies', 'medications', 'medicalHistory'].map((field) => (
+                  <div key={field} className="form-group" style={{ marginBottom: 16 }}>
+                    <label className="form-label" style={{ textTransform: 'capitalize' }}>
+                      {field.replace(/([A-Z])/g, ' $1')}
+                    </label>
                     {profileEdit ? (
-                      <textarea className="form-textarea" value={profileForm[f] || ''} onChange={e => setProfileForm(p => ({ ...p, [f]: e.target.value }))} placeholder={`Enter ${f}...`} />
+                      <textarea
+                        className="form-textarea"
+                        value={profileForm[field] || ''}
+                        onChange={(event) =>
+                          setProfileForm((current) => ({ ...current, [field]: event.target.value }))
+                        }
+                        placeholder={`Enter ${field.replace(/([A-Z])/g, ' $1').toLowerCase()}`}
+                      />
                     ) : (
-                      <div className="profile-field-value">{profile?.[f] || <span style={{ color: 'var(--text-muted)' }}>—</span>}</div>
+                      <div className="profile-field-value">{profile?.[field] || '-'}</div>
                     )}
                   </div>
                 ))}
@@ -436,29 +495,20 @@ export default function PatientDashboard() {
         )}
       </main>
 
-      {/* ── Nudge overlay ── */}
-      {nudging && (
-        <div className="nudge-overlay">
-          <div className="nudge-card">
-            <div className="nudge-pulse">📞</div>
-            <h3 style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>Requesting Consultation</h3>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: 6 }}>Dr. {nudging.firstName} {nudging.lastName}</p>
-            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 24 }}>{nudgeStatus}</p>
-            <div className="spinner" style={{ width: 32, height: 32, margin: '0 auto 20px' }} />
-            <button className="btn btn-ghost w-full" onClick={() => { setNudging(null); setNudgeStatus(''); }}>Cancel</button>
-          </div>
-        </div>
+      {showAppointmentModal && selectedDoctor && (
+        <AppointmentModal
+          doctor={selectedDoctor}
+          onBook={handleBookAppointment}
+          onClose={() => {
+            setShowAppointmentModal(false);
+            setSelectedDoctor(null);
+          }}
+        />
       )}
 
-      {/* ── Appointment booking modal ── */}
-      {showApptModal && selectedDoctor && (
-        <AppointmentModal doctor={selectedDoctor} onBook={handleBookAppointment} onClose={() => setShowApptModal(false)} />
-      )}
-
-      {/* ── Toast ── */}
       {toast && (
         <div className="toast-container">
-          <div className={`toast toast-${toast.type}`}>{toast.msg}</div>
+          <div className={`toast toast-${toast.type}`}>{toast.message}</div>
         </div>
       )}
     </div>
