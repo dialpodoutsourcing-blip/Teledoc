@@ -29,13 +29,15 @@ Copy `.env.example` to `.env` and set:
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `DATABASE_URL`
+- `DIRECT_URL`
 - `NEXT_PUBLIC_APP_URL`
 
 Notes:
 
 - `SUPABASE_SERVICE_ROLE_KEY` is server-only and is used for demo/bootstrap provisioning.
 - `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are required for login and the video room.
-- `DATABASE_URL` should point Prisma at your Supabase Postgres database.
+- `DATABASE_URL` should be your Supabase transaction pooler string for app runtime.
+- `DIRECT_URL` should be your Supabase session pooler or direct connection string for Prisma CLI work.
 
 ## Local development
 
@@ -51,6 +53,11 @@ npm install
 npx prisma generate
 npx prisma db push
 ```
+
+Recommended connection setup:
+
+- `DATABASE_URL`: Supavisor transaction mode for serverless/runtime traffic
+- `DIRECT_URL`: Supavisor session mode, or direct connection if your environment supports IPv6
 
 3. Seed demo users and sample data.
 
@@ -118,6 +125,7 @@ Set these Vercel environment variables:
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `DATABASE_URL`
+- `DIRECT_URL`
 - `NEXT_PUBLIC_APP_URL`
 
 Notes:
@@ -125,6 +133,9 @@ Notes:
 - `postinstall` runs `prisma generate`
 - Node is pinned to `20.x`
 - Seed/bootstrap is manual and should not run automatically on deploy
+- For Vercel, do not use the direct `db.<project-ref>.supabase.co:5432` string as `DATABASE_URL`
+- Use Supabase transaction pooler mode for `DATABASE_URL`, typically on port `6543`, with `?pgbouncer=true&connection_limit=1`
+- Use the session pooler string for `DIRECT_URL`, typically on port `5432`
 
 ## API overview
 

@@ -55,6 +55,7 @@ This file is the implementation source of truth for the Next.js cutover of MediC
 - new:
   - `SUPABASE_SERVICE_ROLE_KEY`
   - `DATABASE_URL`
+  - `DIRECT_URL`
   - `NEXT_PUBLIC_APP_URL`
 
 ## Data Ownership Rules
