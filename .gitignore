@@ -2,6 +2,8 @@ node_modules/
 .env
 dist/
 build/
+.next/
 .DS_Store
 *.log
 prisma/migrations/
+.codex-logs/

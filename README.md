@@ -1,111 +1,81 @@
 # MediConnect
 
-A full-stack telemedicine app with a React/Vite frontend and an Express/Prisma backend.
+MediConnect is now a single root-level Next.js app for Vercel and Supabase. It keeps Prisma on Supabase Postgres for app data, uses Supabase Auth for login/session management, and uses Supabase Realtime plus WebRTC for the 1-on-1 video demo.
 
-## Current demo scope
+## Current scope
 
-This repo now includes a simple 1-on-1 video room demo using:
+- Email/password registration and login with Supabase Auth
+- Doctor and patient dashboards
+- Doctor discovery
+- Appointment booking and doctor-side accept/reject flows
+- Patient history and doctor consultation history
+- A simple authenticated 1-on-1 video room demo at `/consultation/[roomId]`
 
-- WebRTC for peer-to-peer audio/video
-- Supabase Realtime broadcast channels for signaling
-- Express for REST APIs only
+## Stack
 
-The live video demo is intentionally lightweight:
+- Next.js App Router
+- React 18
+- Prisma
+- Supabase Auth
+- Supabase Postgres
+- Supabase Realtime
+- WebRTC
 
-- It uses manual room IDs
-- It reuses `/consultation/:roomId` as the video room
-- It does not use Socket.IO
-- It does not save consultation notes from the live room itself
+## Environment variables
 
-Existing REST features remain available:
+Copy `.env.example` to `.env` and set:
 
-- Authentication and registration
-- Patient and doctor profiles
-- Doctor browsing
-- Appointment booking and management
-- Consultation history and medical records
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `DATABASE_URL`
+- `NEXT_PUBLIC_APP_URL`
 
-## Tech stack
+Notes:
 
-- Frontend: React 18 + Vite
-- Backend: Express
-- Database: PostgreSQL
-- ORM: Prisma
-- Auth: JWT + bcryptjs
-- Live video demo: WebRTC + Supabase Realtime
+- `SUPABASE_SERVICE_ROLE_KEY` is server-only and is used for demo/bootstrap provisioning.
+- `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are required for login and the video room.
+- `DATABASE_URL` should point Prisma at your Supabase Postgres database.
+
+## Local development
+
+1. Install dependencies.
+
+```bash
+npm install
+```
+
+2. Generate the Prisma client and apply the schema.
+
+```bash
+npx prisma generate
+npx prisma db push
+```
+
+3. Seed demo users and sample data.
+
+```bash
+npm run seed
+```
+
+`npm run seed` requires `SUPABASE_SERVICE_ROLE_KEY` so the demo auth users can be created and confirmed through Supabase Admin.
+
+4. Start the app.
+
+```bash
+npm run dev
+```
+
+Open `http://localhost:3000`.
 
 ## Demo credentials
 
-Seed the database, then use:
+After seeding:
 
 - Doctor: `doctor@demo.com` / `demo123`
 - Patient: `patient@demo.com` / `demo123`
 
-## Local development
-
-### 1. Create the database
-
-Create a PostgreSQL database named `telemedicine`.
-
-### 2. Configure environment files
-
-Backend:
-
-Copy `backend/.env.example` to `backend/.env` and set:
-
-- `DATABASE_URL`
-- `JWT_SECRET`
-- `ALLOWED_ORIGINS`
-- `PORT`
-
-Frontend:
-
-Copy `frontend/.env.example` to `frontend/.env` and set:
-
-- `VITE_API_BASE_URL=`
-- `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_ANON_KEY`
-
-Notes:
-
-- Leave `VITE_API_BASE_URL` blank in local development to use the Vite `/api` proxy.
-- `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are required for the video room demo.
-
-### 3. Install dependencies
-
-```bash
-cd backend
-npm install
-
-cd ../frontend
-npm install
-```
-
-### 4. Push Prisma schema and seed demo data
-
-```bash
-cd backend
-npx prisma db push
-npm run seed
-```
-
-### 5. Run both apps
-
-Terminal 1:
-
-```bash
-cd backend
-npm run dev
-```
-
-Terminal 2:
-
-```bash
-cd frontend
-npm run dev
-```
-
-Open `http://localhost:5173`.
+If email confirmation is enabled in your Supabase project and you do not use the service-role seed flow, newly created users must confirm their email before first login.
 
 ## Video demo flow
 
@@ -116,16 +86,16 @@ Open `http://localhost:5173`.
 5. On the receiving side, click `Join Call / Answer`.
 6. On the calling side, click `Start Call`.
 
-If the caller starts before the other participant has joined, just click `Start Call` again after the second participant is ready.
+If the caller starts before the second participant is ready, just start the call again after the other side has joined the room.
 
-## Supabase Realtime signaling
+## Realtime signaling
 
-The frontend uses one Supabase Realtime broadcast channel per room:
+Each room uses one Supabase Realtime broadcast channel:
 
-- Channel name: `video-room-{roomId}`
-- Broadcast event: `signal`
+- Channel: `video-room-{roomId}`
+- Event: `signal`
 
-Signal payload shape:
+Payload shape:
 
 ```json
 {
@@ -137,41 +107,30 @@ Signal payload shape:
 
 ## Deployment
 
-This repo can still be deployed as two separate Vercel projects:
+Deploy one Vercel project from the repo root.
 
-- Frontend project
-  - Root directory: `frontend`
-  - Framework preset: `Vite`
-- Backend project
-  - Root directory: `backend`
-  - Framework preset: `Express`
+- Framework preset: `Next.js`
+- Root directory: repository root
 
-### Frontend environment variables
+Set these Vercel environment variables:
 
-- `VITE_API_BASE_URL=https://YOUR-BACKEND-PROJECT.vercel.app/api`
-- `VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co`
-- `VITE_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY`
-
-### Backend environment variables
-
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
 - `DATABASE_URL`
-- `JWT_SECRET`
-- `ALLOWED_ORIGINS=https://YOUR-FRONTEND-PROJECT.vercel.app`
-- `NODE_ENV=production`
+- `NEXT_PUBLIC_APP_URL`
 
 Notes:
 
 - `postinstall` runs `prisma generate`
 - Node is pinned to `20.x`
-- Prisma seed data is a manual development task and is not run automatically during deploys
-- Express is not used for websocket signaling
+- Seed/bootstrap is manual and should not run automatically on deploy
 
 ## API overview
 
 ```text
-POST   /api/auth/register
-POST   /api/auth/login
-GET    /api/auth/me
+GET    /api/health
+GET    /api/session/me
 
 GET    /api/doctors
 GET    /api/doctors/profile
